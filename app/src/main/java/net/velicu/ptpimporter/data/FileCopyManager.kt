@@ -103,23 +103,20 @@ class FileCopyManager(private val context: Context) {
                                 input.copyTo(output)
                             }
                         }
-                        
+
                         currentFile++
                         updateProgress(currentFile, totalFiles, fileName, startTime, existingFiles.size, filesToCopy.size)
                     }
                 } catch (e: SecurityException) {
                     Log.e("FileCopyManager", "Security exception while copying file: $fileName", e)
                     _progress.value = CopyProgress.error("Permission denied while copying $fileName. This often happens with MTP devices. Try selecting individual files instead of a directory.")
+                    newFile?.delete()
                     return
                 } catch (e: IOException) {
                     Log.e("FileCopyManager", "IO exception while copying file: $fileName", e)
                     _progress.value = CopyProgress.error("Failed to copy $fileName: ${e.message}")
-                    return
-                } finally {
-                    // This isn't perfectly safe as the app could crash harder, but couldn't figure
-                    // out why a temp copy + move didn't work.
-                    Log.e("FileCopyManager", "Deleting dangling file $newFile")
                     newFile?.delete()
+                    return
                 }
             }
             
@@ -156,13 +153,13 @@ class FileCopyManager(private val context: Context) {
                     existingFileNames.add(destFile.name ?: "")
                 }
             }
-            Log.d("FileCopyManager", "Found ${existingFileNames.size} existing files in destination")
+            Log.d("FileCopyManager", "Found ${existingFileNames.size} existing files in destination: $existingFileNames")
         } catch (e: Exception) {
             Log.w("FileCopyManager", "Error scanning destination directory: ${e.message}")
             // If we can't scan the destination, assume all files need to be copied
             return Pair(sourceFiles, emptyList())
         }
-        
+
         // Now do fast in-memory existence checks
         _progress.value = CopyProgress.scanning("Checking which files already exist...")
         
