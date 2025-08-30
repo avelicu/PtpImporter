@@ -34,14 +34,39 @@ class DirectoryManager(private val context: Context) {
         return prefs.getString(KEY_DEST_URI, null)
     }
     
+    fun refreshUriValidity() {
+        Log.d("DirectoryManager", "Refreshing URI validity...")
+        
+        val sourceUri = getSourceDirectory()
+        val destUri = getDestinationDirectory()
+        
+        if (sourceUri != null) {
+            val isValid = isUriValid(sourceUri)
+            Log.d("DirectoryManager", "Source URI validity: $isValid for $sourceUri")
+        }
+        
+        if (destUri != null) {
+            val isValid = isUriValid(destUri)
+            Log.d("DirectoryManager", "Destination URI validity: $isValid for $destUri")
+        }
+    }
+    
     fun isSourceDirectoryValid(): Boolean {
-        val uri = getSourceDirectory() ?: return false
-        return isUriValid(uri)
+        val sourceUri = getSourceDirectory()
+        if (sourceUri == null) return false
+        
+        val isValid = isUriValid(sourceUri)
+        Log.d("DirectoryManager", "Checking source directory validity: $isValid for $sourceUri")
+        return isValid
     }
     
     fun isDestinationDirectoryValid(): Boolean {
-        val uri = getDestinationDirectory() ?: return false
-        return isUriValid(uri)
+        val destUri = getDestinationDirectory()
+        if (destUri == null) return false
+        
+        val isValid = isUriValid(destUri)
+        Log.d("DirectoryManager", "Checking destination directory validity: $isValid for $destUri")
+        return isValid
     }
     
     private fun isUriValid(uriString: String): Boolean {

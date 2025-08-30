@@ -1,6 +1,8 @@
 package net.velicu.ptpimporter.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -9,35 +11,46 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import net.velicu.ptpimporter.data.FileCopyManager
-import net.velicu.ptpimporter.data.DirectoryManager
+import androidx.compose.foundation.layout.safeDrawingPadding
 import net.velicu.ptpimporter.data.CopyProgress
+import net.velicu.ptpimporter.data.DirectoryManager
+import net.velicu.ptpimporter.data.FileCopyManager
 import net.velicu.ptpimporter.data.PermissionManager
 
 @Composable
-fun PtpImporterApp(
-    onRequestPermissions: (() -> Unit) -> Unit = {}
-) {
+fun PtpImporterApp(onRequestPermissions: (() -> Unit) -> Unit) {
     val context = LocalContext.current
+    val permissionManager = remember { PermissionManager(context) }
     val directoryManager = remember { DirectoryManager(context) }
     val fileCopyManager = remember { FileCopyManager(context) }
-    val permissionManager = remember { PermissionManager(context) }
     
     var hasPermissions by remember { mutableStateOf(permissionManager.hasRequiredPermissions()) }
-    
-    // Check permissions when the app resumes
-    LaunchedEffect(Unit) {
-        hasPermissions = permissionManager.hasRequiredPermissions()
-    }
-    
     var sourceDir by remember { mutableStateOf(directoryManager.getSourceDirectory()) }
     var destDir by remember { mutableStateOf(directoryManager.getDestinationDirectory()) }
     var isCopying by remember { mutableStateOf(false) }
     var copyProgress by remember { mutableStateOf<CopyProgress?>(null) }
     
+    // State variables to track directory validity
+    var sourceDirValid by remember { mutableStateOf(sourceDir != null && directoryManager.isSourceDirectoryValid()) }
+    var destDirValid by remember { mutableStateOf(destDir != null && directoryManager.isDestinationDirectoryValid()) }
+    
+    // Function to refresh permissions and URI validity
+    fun refreshPermissionsAndAccess() {
+        hasPermissions = permissionManager.hasRequiredPermissions()
+        directoryManager.refreshUriValidity()
+        
+        // Update directory validity states
+        sourceDirValid = sourceDir != null && directoryManager.isSourceDirectoryValid()
+        destDirValid = destDir != null && directoryManager.isDestinationDirectoryValid()
+    }
+    
+    // Check permissions when the app starts
+    LaunchedEffect(Unit) {
+        hasPermissions = permissionManager.hasRequiredPermissions()
+    }
+    
     LaunchedEffect(Unit) {
         fileCopyManager.progress.collect { progress ->
-            android.util.Log.d("PtpImporterApp", "Progress update: $progress")
             copyProgress = progress
             progress?.let { safeProgress ->
                 if (safeProgress.isComplete || safeProgress.hasError || safeProgress.cancelled) {
@@ -50,8 +63,9 @@ fun PtpImporterApp(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .safeDrawingPadding()
+            .padding(horizontal = 16.dp)
+            .verticalScroll(rememberScrollState())
     ) {
         Text(
             text = "PTP Importer",
@@ -136,14 +150,15 @@ fun PtpImporterApp(
                     Spacer(modifier = Modifier.weight(1f))
                     Button(
                         onClick = {
-                            hasPermissions = permissionManager.hasRequiredPermissions()
+                            // Refresh both permissions and URI validity
+                            refreshPermissionsAndAccess()
                         },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.secondary
                         ),
                         modifier = Modifier.height(32.dp)
                     ) {
-                        Text("Refresh", fontSize = 12.sp)
+                        Text("Refresh Permissions & Access", fontSize = 12.sp)
                     }
                 }
             }
@@ -156,12 +171,15 @@ fun PtpImporterApp(
             onDirectorySelected = { path ->
                 sourceDir = path
                 directoryManager.setSourceDirectory(path)
+                sourceDirValid = directoryManager.isSourceDirectoryValid()
             },
             modifier = Modifier.fillMaxWidth(),
             enabled = hasPermissions,
-            isValid = directoryManager.isSourceDirectoryValid(),
+            isValid = sourceDirValid,
             onTakePermission = { uri ->
                 directoryManager.takePersistableUriPermission(uri, true)
+                // Refresh validity after taking permission
+                sourceDirValid = directoryManager.isSourceDirectoryValid()
             }
         )
         
@@ -174,12 +192,15 @@ fun PtpImporterApp(
             onDirectorySelected = { path ->
                 destDir = path
                 directoryManager.setDestinationDirectory(path)
+                destDirValid = directoryManager.isDestinationDirectoryValid()
             },
             modifier = Modifier.fillMaxWidth(),
             enabled = hasPermissions,
-            isValid = directoryManager.isDestinationDirectoryValid(),
+            isValid = destDirValid,
             onTakePermission = { uri ->
                 directoryManager.takePersistableUriPermission(uri, false)
+                // Refresh validity after taking permission
+                destDirValid = directoryManager.isDestinationDirectoryValid()
             }
         )
         
@@ -243,8 +264,8 @@ fun PtpImporterApp(
             enabled = hasPermissions && 
                      sourceDir != null && 
                      destDir != null && 
-                     directoryManager.isSourceDirectoryValid() && 
-                     directoryManager.isDestinationDirectoryValid() && 
+                     sourceDirValid && 
+                     destDirValid && 
                      !isCopying,
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -253,7 +274,7 @@ fun PtpImporterApp(
         
         // Help text for disabled copy button
         if (hasPermissions && sourceDir != null && destDir != null && 
-            (!directoryManager.isSourceDirectoryValid() || !directoryManager.isDestinationDirectoryValid())) {
+            (!sourceDirValid || !destDirValid)) {
             Text(
                 text = "⚠️ One or more directories have expired access. Please reselect them to continue.",
                 style = MaterialTheme.typography.bodySmall,
@@ -377,14 +398,20 @@ fun PtpImporterApp(
         Spacer(modifier = Modifier.height(16.dp))
         
         // Progress Display
-        if (isCopying && copyProgress != null && !copyProgress!!.hasError) {
+        copyProgress?.let { progress ->
+            Spacer(modifier = Modifier.height(16.dp))
             ProgressDisplay(
-                progress = copyProgress!!,
+                progress = progress,
                 onCancel = {
                     fileCopyManager.cancelCopying()
                     isCopying = false
                 }
             )
+            
+            // Show scanning state even when not in copying mode
+            if (progress.isScanning) {
+                isCopying = true
+            }
         }
     }
 } 

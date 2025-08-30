@@ -43,11 +43,10 @@ class MainActivity : ComponentActivity() {
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
         setContent {
             PtpImporterTheme {
                 Surface(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize(), 
                     color = MaterialTheme.colorScheme.background
                 ) {
                     PtpImporterApp(
