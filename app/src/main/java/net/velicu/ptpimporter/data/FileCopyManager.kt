@@ -92,15 +92,18 @@ class FileCopyManager(private val context: Context) {
 
             for (file in filesToCopy) {
                 ensureActive()
-                val fileName = file.name ?: "unknown.jpg"
+                val fileName = file.name ?: continue
+
+                var newFile: DocumentFile? = null
                 try {
-                    val newFile = destDir.createFile("image/jpeg", fileName)
+                    newFile = destDir.createFile("image/jpeg", fileName)
                     if (newFile != null) {
                         context.contentResolver.openInputStream(file.uri)?.use { input ->
                             context.contentResolver.openOutputStream(newFile.uri)?.use { output ->
                                 input.copyTo(output)
                             }
                         }
+                        
                         currentFile++
                         updateProgress(currentFile, totalFiles, fileName, startTime, existingFiles.size, filesToCopy.size)
                     }
@@ -112,6 +115,11 @@ class FileCopyManager(private val context: Context) {
                     Log.e("FileCopyManager", "IO exception while copying file: $fileName", e)
                     _progress.value = CopyProgress.error("Failed to copy $fileName: ${e.message}")
                     return
+                } finally {
+                    // This isn't perfectly safe as the app could crash harder, but couldn't figure
+                    // out why a temp copy + move didn't work.
+                    Log.e("FileCopyManager", "Deleting dangling file $newFile")
+                    newFile?.delete()
                 }
             }
             
