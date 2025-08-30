@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import net.velicu.ptpimporter.ui.PtpImporterApp
 import net.velicu.ptpimporter.ui.theme.PtpImporterTheme
+import android.content.Intent
 
 class MainActivity : ComponentActivity() {
     
@@ -43,6 +44,10 @@ class MainActivity : ComponentActivity() {
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // Extract source directory from intent if available
+        val sourceUri = extractSourceUriFromIntent(intent)
+        
         setContent {
             PtpImporterTheme {
                 Surface(
@@ -53,9 +58,54 @@ class MainActivity : ComponentActivity() {
                         onRequestPermissions = { callback ->
                             permissionCallback = callback
                             requestPermissions()
-                        }
+                        },
+                        initialSourceUri = sourceUri
                     )
                 }
+            }
+        }
+    }
+    
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        
+        // Handle new intents (e.g., when app is already running and new MTP device is connected)
+        intent?.let { newIntent ->
+            val sourceUri = extractSourceUriFromIntent(newIntent)
+            if (sourceUri != null) {
+                // Update the app with the new source URI
+                // This will be handled by the PtpImporterApp
+                android.util.Log.d("MainActivity", "New intent received with source URI: $sourceUri")
+            }
+        }
+    }
+    
+    private fun extractSourceUriFromIntent(intent: Intent?): String? {
+        if (intent == null) return null
+        
+        return when (intent.action) {
+            Intent.ACTION_VIEW -> {
+                // Handle content:// URIs from file managers
+                intent.data?.toString()
+            }
+            Intent.ACTION_PICK -> {
+                // Handle image picker intents
+                intent.data?.toString()
+            }
+            Intent.ACTION_GET_CONTENT -> {
+                // Handle content selection intents
+                intent.data?.toString()
+            }
+            "android.hardware.usb.action.USB_DEVICE_ATTACHED" -> {
+                // Handle USB device attachment
+                // For MTP devices, we'll need to prompt user to select the directory
+                // since we can't automatically determine the correct path
+                android.util.Log.d("MainActivity", "USB device attached - user will need to select directory")
+                null
+            }
+            else -> {
+                // Check for any content URI in the intent data
+                intent.data?.toString()
             }
         }
     }

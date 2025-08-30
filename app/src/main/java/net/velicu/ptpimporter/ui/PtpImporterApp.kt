@@ -16,9 +16,14 @@ import net.velicu.ptpimporter.data.CopyProgress
 import net.velicu.ptpimporter.data.DirectoryManager
 import net.velicu.ptpimporter.data.FileCopyManager
 import net.velicu.ptpimporter.data.PermissionManager
+import android.net.Uri
+import androidx.documentfile.provider.DocumentFile
 
 @Composable
-fun PtpImporterApp(onRequestPermissions: (() -> Unit) -> Unit) {
+fun PtpImporterApp(
+    onRequestPermissions: (() -> Unit) -> Unit,
+    initialSourceUri: String? = null
+) {
     val context = LocalContext.current
     val permissionManager = remember { PermissionManager(context) }
     val directoryManager = remember { DirectoryManager(context) }
@@ -34,6 +39,9 @@ fun PtpImporterApp(onRequestPermissions: (() -> Unit) -> Unit) {
     var sourceDirValid by remember { mutableStateOf(sourceDir != null && directoryManager.isSourceDirectoryValid()) }
     var destDirValid by remember { mutableStateOf(destDir != null && directoryManager.isDestinationDirectoryValid()) }
     
+    // Track if source directory was auto-populated from intent
+    var sourceAutoPopulated by remember { mutableStateOf(false) }
+    
     // Function to refresh permissions and URI validity
     fun refreshPermissionsAndAccess() {
         hasPermissions = permissionManager.hasRequiredPermissions()
@@ -44,9 +52,58 @@ fun PtpImporterApp(onRequestPermissions: (() -> Unit) -> Unit) {
         destDirValid = destDir != null && directoryManager.isDestinationDirectoryValid()
     }
     
+    // Function to get parent directory URI from a file URI
+    fun getParentDirectoryUri(fileUri: String): String? {
+        return try {
+            val uri = Uri.parse(fileUri)
+            val documentFile = DocumentFile.fromSingleUri(context, uri)
+            
+            if (documentFile != null && documentFile.exists()) {
+                val parent = documentFile.parentFile
+                if (parent != null && parent.exists()) {
+                    // Return the tree URI of the parent directory
+                    parent.uri.toString()
+                } else {
+                    null
+                }
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("PtpImporterApp", "Error getting parent directory URI", e)
+            null
+        }
+    }
+    
     // Check permissions when the app starts
     LaunchedEffect(Unit) {
         hasPermissions = permissionManager.hasRequiredPermissions()
+    }
+    
+    // Handle initial source URI if provided
+    LaunchedEffect(initialSourceUri) {
+        initialSourceUri?.let { uri ->
+            if (hasPermissions) {
+                android.util.Log.d("PtpImporterApp", "Setting initial source URI: $uri")
+                
+                // Try to get the parent directory of the selected file
+                val parentUri = getParentDirectoryUri(uri)
+                if (parentUri != null) {
+                    sourceDir = parentUri
+                    directoryManager.setSourceDirectory(parentUri)
+                    sourceDirValid = directoryManager.isSourceDirectoryValid()
+                    sourceAutoPopulated = true
+                    android.util.Log.d("PtpImporterApp", "Set source directory to parent: $parentUri")
+                } else {
+                    // If we can't get parent, use the file URI directly
+                    sourceDir = uri
+                    directoryManager.setSourceDirectory(uri)
+                    sourceDirValid = directoryManager.isSourceDirectoryValid()
+                    sourceAutoPopulated = true
+                    android.util.Log.d("PtpImporterApp", "Set source directory to file: $uri")
+                }
+            }
+        }
     }
     
     LaunchedEffect(Unit) {
@@ -159,6 +216,52 @@ fun PtpImporterApp(onRequestPermissions: (() -> Unit) -> Unit) {
                         modifier = Modifier.height(32.dp)
                     ) {
                         Text("Refresh Permissions & Access", fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+        
+        // Auto-populated source directory notification
+        if (sourceAutoPopulated && sourceDir != null) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "📱",
+                        fontSize = 20.sp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = "Source directory auto-populated",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                        Text(
+                            text = "Connected device directory automatically selected",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                    }
+                    Spacer(modifier = Modifier.weight(1f))
+                    Button(
+                        onClick = { sourceAutoPopulated = false },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.tertiary
+                        ),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Text("Dismiss", fontSize = 12.sp)
                     }
                 }
             }

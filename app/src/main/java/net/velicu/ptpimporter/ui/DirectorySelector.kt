@@ -11,11 +11,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.documentfile.provider.DocumentFile
 import net.velicu.ptpimporter.utils.DirectoryUtils
 import android.net.Uri
+import android.content.Context
 
 @Composable
 fun DirectorySelector(
@@ -33,30 +35,65 @@ fun DirectorySelector(
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
         uri?.let { selectedUri ->
-            // Take persistable permission first
-            onTakePermission?.invoke(selectedUri)
-            
-            val path = DirectoryUtils.getPathFromUri(context, selectedUri)
+            onTakePermission?.invoke(selectedUri) // Call persistable permission callback
+            val path = DirectoryUtils.getPathFromUri(selectedUri)
             if (path != null) {
                 onDirectorySelected(path)
             }
         }
     }
     
+    // Function to get display text for the current path
+    fun getDisplayText(path: String?): String {
+        if (path == null) return "Select directory..."
+        if (!isValid) return "Directory access expired - tap to reselect"
+        
+        return try {
+            val uri = Uri.parse(path)
+            DirectoryUtils.getFriendlyName(context, uri)
+        } catch (e: Exception) {
+            // Fallback to showing part of the URI
+            if (path.length > 50) {
+                "..." + path.takeLast(47)
+            } else {
+                path
+            }
+        }
+    }
+    
+    // Function to get additional context about the directory
+    fun getDirectoryContext(path: String): String {
+        return try {
+            val uri = Uri.parse(path)
+            when {
+                uri.scheme == "content" -> {
+                    when {
+                        uri.host?.contains("mtp", ignoreCase = true) == true -> "MTP Device"
+                        uri.host?.contains("external", ignoreCase = true) == true -> "External Storage"
+                        uri.host?.contains("primary", ignoreCase = true) == true -> "Internal Storage"
+                        else -> "Cloud/Network Storage"
+                    }
+                }
+                uri.scheme == "file" -> "Local Storage"
+                else -> "Unknown Storage"
+            }
+        } catch (e: Exception) {
+            ""
+        }
+    }
+    
     Column(modifier = modifier) {
         Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 text = label,
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.padding(bottom = 8.dp)
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface
             )
-            
             Spacer(modifier = Modifier.weight(1f))
-            
-            // Validity indicator
             if (currentPath != null) {
                 if (isValid) {
                     Text(
@@ -77,7 +114,6 @@ fun DirectorySelector(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(56.dp)
                 .border(
                     width = 1.dp,
                     color = when {
@@ -88,28 +124,40 @@ fun DirectorySelector(
                     shape = MaterialTheme.shapes.small
                 )
                 .clickable(enabled = enabled) { directoryLauncher.launch(null) }
-                .padding(horizontal = 16.dp),
-            contentAlignment = Alignment.CenterStart
+                .padding(12.dp)
         ) {
-            Text(
-                text = when {
-                    currentPath == null -> "Select directory..."
-                    !isValid -> "Directory access expired - tap to reselect"
-                    else -> currentPath
-                },
-                style = MaterialTheme.typography.bodyMedium,
-                color = when {
-                    !enabled -> MaterialTheme.colorScheme.onSurfaceVariant
-                    !isValid -> MaterialTheme.colorScheme.error
-                    currentPath != null -> MaterialTheme.colorScheme.onSurface
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Column(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = getDisplayText(currentPath),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = when {
+                        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant
+                        !isValid -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.onSurface
+                    },
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                
+                // Show additional context if available
+                if (currentPath != null && isValid) {
+                    val contextInfo = getDirectoryContext(currentPath)
+                    if (contextInfo.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = contextInfo,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
         }
         
-        // Show warning for expired directories
         if (currentPath != null && !isValid) {
             Text(
                 text = "This directory's access has expired. Please reselect it to continue.",

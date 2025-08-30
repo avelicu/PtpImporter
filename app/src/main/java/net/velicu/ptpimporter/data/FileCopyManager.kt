@@ -34,6 +34,7 @@ class FileCopyManager(private val context: Context) {
         try {
             // Test directory access first
             testDirectoryAccess(sourceUri, destUri)
+            ensureActive()
             
             val sourceDir = DocumentFile.fromTreeUri(context, Uri.parse(sourceUri))
             val destDir = DocumentFile.fromTreeUri(context, Uri.parse(destUri))
@@ -52,8 +53,7 @@ class FileCopyManager(private val context: Context) {
             _progress.value = CopyProgress.scanning("Scanning source directory for JPG files...")
             
             val allFiles = getAllFilesRecursively(sourceDir)
-            _progress.value = CopyProgress.scanning("Found ${allFiles.size} total files, filtering JPG files...")
-            
+
             val jpgFiles = allFiles.filter { file ->
                 file.name?.lowercase()?.endsWith(".jpg") == true || 
                 file.name?.lowercase()?.endsWith(".jpeg") == true
@@ -67,7 +67,7 @@ class FileCopyManager(private val context: Context) {
             // Pre-calculate existing files
             _progress.value = CopyProgress.scanning("Found ${jpgFiles.size} JPG files. Checking destination for existing files...")
             val (filesToCopy, existingFiles) = precalculateExistingFiles(jpgFiles, destDir)
-            
+
             if (filesToCopy.isEmpty()) {
                 Log.d("FileCopyManager", "All JPG files already exist in destination")
                 _progress.value = CopyProgress(
