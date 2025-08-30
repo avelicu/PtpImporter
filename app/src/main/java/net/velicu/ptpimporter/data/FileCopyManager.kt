@@ -11,6 +11,10 @@ import java.io.InputStream
 import java.io.OutputStream
 import android.util.Log
 import java.io.File
+import androidx.exifinterface.media.ExifInterface
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class FileCopyManager(private val context: Context) {
     private var copyJob: Job? = null
@@ -97,6 +101,7 @@ class FileCopyManager(private val context: Context) {
             for (file in filesToCopy) {
                 ensureActive()
                 val fileName = file.name ?: continue
+                val destinationFileName = buildDestinationFileName(file)
 
                 // Update progress to show the file we're about to copy
                 currentFile++
@@ -106,7 +111,7 @@ class FileCopyManager(private val context: Context) {
                 var copyFinished = false
                 try {
                     val mimeType = getMimeTypeForFile(fileName)
-                    newFile = destDir.createFile(mimeType, fileName)
+                    newFile = destDir.createFile(mimeType, destinationFileName)
                     if (newFile != null) {
                         context.contentResolver.openInputStream(file.uri)?.use { input ->
                             context.contentResolver.openOutputStream(newFile.uri)?.use { output ->
@@ -181,9 +186,8 @@ class FileCopyManager(private val context: Context) {
                 _progress.value = CopyProgress.scanning("Checking existing files... ${index + 1}/${sourceFiles.size}")
             }
             
-            val fileName = sourceFile.name ?: continue
-            
-            if (existingFileNames.contains(fileName)) {
+            val destinationFileName = buildDestinationFileName(sourceFile)
+            if (existingFileNames.contains(destinationFileName)) {
                 existingFiles.add(sourceFile)
             } else {
                 filesToCopy.add(sourceFile)
@@ -192,6 +196,54 @@ class FileCopyManager(private val context: Context) {
         
         Log.d("FileCopyManager", "Pre-calculation complete: ${sourceFiles.size} total, ${existingFiles.size} exist, ${filesToCopy.size} to copy")
         return Pair(filesToCopy, existingFiles)
+    }
+
+    private fun buildDestinationFileName(sourceFile: DocumentFile): String {
+        val originalName = sourceFile.name ?: "file"
+        val datePrefix = getCreationDatePrefix(sourceFile)
+        return "$datePrefix-$originalName"
+    }
+
+    private fun getCreationDatePrefix(sourceFile: DocumentFile): String {
+        // Try EXIF for images first
+        val nameLower = (sourceFile.name ?: "").lowercase(Locale.US)
+        val imageExtensions = setOf("jpg", "jpeg", "png", "tiff", "tif", "webp", "gif", "bmp", "dng", "cr2", "nef", "arw", "raf", "orf", "rw2", "pef", "srw")
+        val ext = nameLower.substringAfterLast('.', "")
+        // EXIF date format example: 2020:01:31 12:34:56
+        if (ext in imageExtensions) {
+            try {
+                context.contentResolver.openInputStream(sourceFile.uri)?.use { input ->
+                    val exif = ExifInterface(input)
+                    val exifDate = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
+                        ?: exif.getAttribute(ExifInterface.TAG_DATETIME)
+                    if (!exifDate.isNullOrBlank()) {
+                        val millis = parseExifDateMillis(exifDate)
+                        if (millis != null) return formatDatePrefix(millis)
+                    }
+                }
+            } catch (_: Exception) {
+                // Fallbacks below
+            }
+        }
+        // Fallback to lastModified if available
+        val lastModified = sourceFile.lastModified()
+        if (lastModified > 0L) return formatDatePrefix(lastModified)
+        // Final fallback: today
+        return formatDatePrefix(System.currentTimeMillis())
+    }
+
+    private fun parseExifDateMillis(exifDate: String): Long? {
+        return try {
+            val parser = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US)
+            parser.parse(exifDate)?.time
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun formatDatePrefix(millis: Long): String {
+        val fmt = SimpleDateFormat("yyyyMMdd", Locale.US)
+        return fmt.format(Date(millis))
     }
     
     private fun CoroutineScope.getAllFilesRecursively(directory: DocumentFile): List<DocumentFile> {
