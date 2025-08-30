@@ -11,6 +11,11 @@ import java.io.InputStream
 import java.io.OutputStream
 import android.util.Log
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import android.provider.DocumentsContract
+import android.provider.MediaStore
 
 class FileCopyManager(private val context: Context) {
     private var copyJob: Job? = null
@@ -97,6 +102,7 @@ class FileCopyManager(private val context: Context) {
             for (file in filesToCopy) {
                 ensureActive()
                 val fileName = file.name ?: continue
+                val destinationFileName = buildDestinationFileName(file)
 
                 // Update progress to show the file we're about to copy
                 currentFile++
@@ -106,7 +112,7 @@ class FileCopyManager(private val context: Context) {
                 var copyFinished = false
                 try {
                     val mimeType = getMimeTypeForFile(fileName)
-                    newFile = destDir.createFile(mimeType, fileName)
+                    newFile = destDir.createFile(mimeType, destinationFileName)
                     if (newFile != null) {
                         context.contentResolver.openInputStream(file.uri)?.use { input ->
                             context.contentResolver.openOutputStream(newFile.uri)?.use { output ->
@@ -181,9 +187,8 @@ class FileCopyManager(private val context: Context) {
                 _progress.value = CopyProgress.scanning("Checking existing files... ${index + 1}/${sourceFiles.size}")
             }
             
-            val fileName = sourceFile.name ?: continue
-            
-            if (existingFileNames.contains(fileName)) {
+            val destinationFileName = buildDestinationFileName(sourceFile)
+            if (existingFileNames.contains(destinationFileName)) {
                 existingFiles.add(sourceFile)
             } else {
                 filesToCopy.add(sourceFile)
@@ -192,6 +197,64 @@ class FileCopyManager(private val context: Context) {
         
         Log.d("FileCopyManager", "Pre-calculation complete: ${sourceFiles.size} total, ${existingFiles.size} exist, ${filesToCopy.size} to copy")
         return Pair(filesToCopy, existingFiles)
+    }
+
+    private fun buildDestinationFileName(sourceFile: DocumentFile): String {
+        val originalName = sourceFile.name ?: "file"
+        val datePrefix = getCreationDatePrefix(sourceFile)
+        return "$datePrefix-$originalName"
+    }
+
+    private fun getCreationDatePrefix(sourceFile: DocumentFile): String {
+        val createdMs = queryBestCreationMillis(sourceFile)
+        val millis = createdMs ?: sourceFile.lastModified().takeIf { it > 0L } ?: System.currentTimeMillis()
+        return formatDatePrefix(millis)
+    }
+
+    private fun queryBestCreationMillis(sourceFile: DocumentFile): Long? {
+        val resolver = context.contentResolver
+        val uri = sourceFile.uri
+        // Try multiple common columns without reading file content
+        val projection = arrayOf(
+            // MediaStore columns
+            MediaStore.Images.ImageColumns.DATE_TAKEN,
+            MediaStore.Video.VideoColumns.DATE_TAKEN,
+            MediaStore.MediaColumns.DATE_ADDED,
+            MediaStore.MediaColumns.DATE_MODIFIED,
+            // DocumentsContract column for last modified
+            DocumentsContract.Document.COLUMN_LAST_MODIFIED
+        )
+        return try {
+            resolver.query(uri, projection, null, null, null)?.use { cursor ->
+                if (!cursor.moveToFirst()) return null
+
+                fun readMs(columnName: String): Long? {
+                    val idx = cursor.getColumnIndex(columnName)
+                    if (idx >= 0 && !cursor.isNull(idx)) {
+                        val value = cursor.getLong(idx)
+                        if (value <= 0L) return null
+                        // Heuristic: values < 10^12 are likely seconds, otherwise millis
+                        val isSeconds = value < 1_000_000_000_000L
+                        return if (isSeconds) value * 1000L else value
+                    }
+                    return null
+                }
+
+                // Prefer true capture/creation-like times
+                readMs(MediaStore.Images.ImageColumns.DATE_TAKEN)
+                    ?: readMs(MediaStore.Video.VideoColumns.DATE_TAKEN)
+                    ?: readMs(MediaStore.MediaColumns.DATE_ADDED)
+                    ?: readMs(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+                    ?: readMs(MediaStore.MediaColumns.DATE_MODIFIED)
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun formatDatePrefix(millis: Long): String {
+        val fmt = SimpleDateFormat("yyyyMMdd", Locale.US)
+        return fmt.format(Date(millis))
     }
     
     private fun CoroutineScope.getAllFilesRecursively(directory: DocumentFile): List<DocumentFile> {
