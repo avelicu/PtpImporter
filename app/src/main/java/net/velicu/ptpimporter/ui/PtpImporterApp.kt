@@ -159,7 +159,10 @@ fun PtpImporterApp(
             },
             modifier = Modifier.fillMaxWidth(),
             enabled = hasPermissions,
-            isValid = directoryManager.isSourceDirectoryValid()
+            isValid = directoryManager.isSourceDirectoryValid(),
+            onTakePermission = { uri ->
+                directoryManager.takePersistableUriPermission(uri, true)
+            }
         )
         
         Spacer(modifier = Modifier.height(16.dp))
@@ -174,7 +177,10 @@ fun PtpImporterApp(
             },
             modifier = Modifier.fillMaxWidth(),
             enabled = hasPermissions,
-            isValid = directoryManager.isDestinationDirectoryValid()
+            isValid = directoryManager.isDestinationDirectoryValid(),
+            onTakePermission = { uri ->
+                directoryManager.takePersistableUriPermission(uri, false)
+            }
         )
         
         // Helpful tips for directory selection
@@ -211,6 +217,13 @@ fun PtpImporterApp(
                         text = "• The app will search recursively through all subfolders",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "🔒 Persistent Access: Selected directories will remain accessible even after app restarts",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Medium
                     )
                 }
             }

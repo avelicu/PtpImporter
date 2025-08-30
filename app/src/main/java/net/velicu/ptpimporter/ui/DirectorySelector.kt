@@ -15,6 +15,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.documentfile.provider.DocumentFile
 import net.velicu.ptpimporter.utils.DirectoryUtils
+import android.net.Uri
 
 @Composable
 fun DirectorySelector(
@@ -23,7 +24,8 @@ fun DirectorySelector(
     onDirectorySelected: (String) -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    isValid: Boolean = true
+    isValid: Boolean = true,
+    onTakePermission: ((Uri) -> Unit)? = null
 ) {
     val context = LocalContext.current
     
@@ -31,6 +33,9 @@ fun DirectorySelector(
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
         uri?.let { selectedUri ->
+            // Take persistable permission first
+            onTakePermission?.invoke(selectedUri)
+            
             val path = DirectoryUtils.getPathFromUri(context, selectedUri)
             if (path != null) {
                 onDirectorySelected(path)
