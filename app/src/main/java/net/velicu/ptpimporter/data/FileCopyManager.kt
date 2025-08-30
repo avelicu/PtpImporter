@@ -17,12 +17,12 @@ class FileCopyManager(private val context: Context) {
     private val _progress = MutableStateFlow<CopyProgress?>(null)
     val progress: StateFlow<CopyProgress?> = _progress
     
-    fun startCopying(sourcePath: String, destPath: String) {
+    fun startCopying(sourcePath: String, destPath: String, fileExtensions: Set<String> = setOf(".jpg", ".jpeg")) {
         copyJob?.cancel()
         copyJob = CoroutineScope(Dispatchers.IO).launch {
             try {
-                Log.d("FileCopyManager", "Using URI-based copying")
-                copyJpgFilesFromUris(sourcePath, destPath)
+                Log.d("FileCopyManager", "Using URI-based copying for extensions: $fileExtensions")
+                copyFilesFromUris(sourcePath, destPath, fileExtensions)
             } catch (e: Exception) {
                 Log.e("FileCopyManager", "Error in startCopying", e)
                 _progress.value = CopyProgress.error("Failed to start copying: ${e.message}")
@@ -30,7 +30,7 @@ class FileCopyManager(private val context: Context) {
         }
     }
     
-    private fun CoroutineScope.copyJpgFilesFromUris(sourceUri: String, destUri: String) {
+    private fun CoroutineScope.copyFilesFromUris(sourceUri: String, destUri: String, fileExtensions: Set<String>) {
         try {
             // Test directory access first
             testDirectoryAccess(sourceUri, destUri)
@@ -50,26 +50,30 @@ class FileCopyManager(private val context: Context) {
             }
 
             // Start scanning phase
-            _progress.value = CopyProgress.scanning("Scanning source directory for JPG files...")
+            val extensionsText = fileExtensions.joinToString(", ") { it.uppercase() }
+            _progress.value = CopyProgress.scanning("Scanning source directory for $extensionsText files...")
             
             val allFiles = getAllFilesRecursively(sourceDir)
 
-            val jpgFiles = allFiles.filter { file ->
-                file.name?.lowercase()?.endsWith(".jpg") == true || 
-                file.name?.lowercase()?.endsWith(".jpeg") == true
+            val selectedFiles = allFiles.filter { file ->
+                file.name?.let { fileName ->
+                    fileExtensions.any { ext -> 
+                        fileName.lowercase().endsWith(ext.lowercase()) 
+                    }
+                } ?: false
             }
             
-            if (jpgFiles.isEmpty()) {
-                _progress.value = CopyProgress.error("No JPG files found in source directory")
+            if (selectedFiles.isEmpty()) {
+                _progress.value = CopyProgress.error("No $extensionsText files found in source directory")
                 return
             }
 
             // Pre-calculate existing files
-            _progress.value = CopyProgress.scanning("Found ${jpgFiles.size} JPG files. Checking destination for existing files...")
-            val (filesToCopy, existingFiles) = precalculateExistingFiles(jpgFiles, destDir)
+            _progress.value = CopyProgress.scanning("Found ${selectedFiles.size} $extensionsText files. Checking destination for existing files...")
+            val (filesToCopy, existingFiles) = precalculateExistingFiles(selectedFiles, destDir)
 
             if (filesToCopy.isEmpty()) {
-                Log.d("FileCopyManager", "All JPG files already exist in destination")
+                Log.d("FileCopyManager", "All $extensionsText files already exist in destination")
                 _progress.value = CopyProgress(
                     currentFile = 0,
                     totalFiles = 0,
@@ -84,7 +88,7 @@ class FileCopyManager(private val context: Context) {
             }
 
             val totalFiles = filesToCopy.size
-            Log.d("FileCopyManager", "Found ${jpgFiles.size} total JPG files, ${existingFiles.size} already exist, ${filesToCopy.size} will be copied")
+            Log.d("FileCopyManager", "Found ${selectedFiles.size} total $extensionsText files, ${existingFiles.size} already exist, ${filesToCopy.size} will be copied")
             var currentFile = 0
             val startTime = System.currentTimeMillis()
 
@@ -97,7 +101,8 @@ class FileCopyManager(private val context: Context) {
                 var newFile: DocumentFile? = null
                 var copyFinished = false
                 try {
-                    newFile = destDir.createFile("image/jpeg", fileName)
+                    val mimeType = getMimeTypeForFile(fileName)
+                    newFile = destDir.createFile(mimeType, fileName)
                     if (newFile != null) {
                         context.contentResolver.openInputStream(file.uri)?.use { input ->
                             context.contentResolver.openOutputStream(newFile.uri)?.use { output ->
@@ -280,5 +285,27 @@ class FileCopyManager(private val context: Context) {
             existingFiles = existingFiles,
             filesToCopy = filesToCopy
         )
+    }
+    
+    private fun getMimeTypeForFile(fileName: String): String {
+        return when (fileName.lowercase()) {
+            in listOf(".jpg", ".jpeg") -> "image/jpeg"
+            in listOf(".png") -> "image/png"
+            in listOf(".gif") -> "image/gif"
+            in listOf(".bmp") -> "image/bmp"
+            in listOf(".webp") -> "image/webp"
+            in listOf(".tiff", ".tif") -> "image/tiff"
+            in listOf(".cr2", ".nef", ".arw", ".dng", ".raf", ".orf", ".rw2", ".pef", ".srw") -> "image/x-raw"
+            in listOf(".mp4") -> "video/mp4"
+            in listOf(".mov") -> "video/quicktime"
+            in listOf(".avi") -> "video/x-msvideo"
+            in listOf(".mkv") -> "video/x-matroska"
+            in listOf(".wmv") -> "video/x-ms-wmv"
+            in listOf(".flv") -> "video/x-flv"
+            in listOf(".webm") -> "video/webm"
+            in listOf(".m4v") -> "video/x-m4v"
+            in listOf(".3gp") -> "video/3gpp"
+            else -> "application/octet-stream" // Default fallback
+        }
     }
 } 

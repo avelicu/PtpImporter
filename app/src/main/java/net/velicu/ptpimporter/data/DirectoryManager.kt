@@ -16,6 +16,7 @@ class DirectoryManager(private val context: Context) {
     companion object {
         private const val KEY_SOURCE_URI = "source_uri"
         private const val KEY_DEST_URI = "destination_uri"
+        private const val KEY_SELECTED_FILE_TYPES = "selected_file_types"
     }
     
     fun setSourceDirectory(uri: String) {
@@ -93,7 +94,23 @@ class DirectoryManager(private val context: Context) {
     }
     
     fun clearDirectories() {
-        prefs.edit().remove(KEY_SOURCE_URI).remove(KEY_DEST_URI).apply()
+        prefs.edit().remove(KEY_SOURCE_URI).remove(KEY_DEST_URI).remove(KEY_SELECTED_FILE_TYPES).apply()
+    }
+    
+    fun setSelectedFileTypes(fileTypes: Set<String>) {
+        Log.d("DirectoryManager", "Saving selected file types: $fileTypes")
+        prefs.edit().putStringSet(KEY_SELECTED_FILE_TYPES, fileTypes).apply()
+    }
+    
+    fun getSelectedFileTypes(): Set<String> {
+        val savedTypes = prefs.getStringSet(KEY_SELECTED_FILE_TYPES, setOf(".jpg", ".jpeg")) ?: setOf(".jpg", ".jpeg")
+        Log.d("DirectoryManager", "Loading saved file types: $savedTypes")
+        return savedTypes
+    }
+    
+    fun resetFileTypesToDefaults() {
+        Log.d("DirectoryManager", "Resetting file types to defaults")
+        prefs.edit().remove(KEY_SELECTED_FILE_TYPES).apply()
     }
     
     fun takePersistableUriPermission(uri: Uri, isSource: Boolean) {

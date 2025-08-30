@@ -16,6 +16,7 @@ import net.velicu.ptpimporter.data.CopyProgress
 import net.velicu.ptpimporter.data.DirectoryManager
 import net.velicu.ptpimporter.data.FileCopyManager
 import net.velicu.ptpimporter.data.PermissionManager
+import net.velicu.ptpimporter.ui.FileTypeSelector
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 
@@ -32,6 +33,7 @@ fun PtpImporterApp(
     var hasPermissions by remember { mutableStateOf(permissionManager.hasRequiredPermissions()) }
     var sourceDir by remember { mutableStateOf(directoryManager.getSourceDirectory()) }
     var destDir by remember { mutableStateOf(directoryManager.getDestinationDirectory()) }
+    var selectedFileTypes by remember { mutableStateOf(directoryManager.getSelectedFileTypes()) }
     var isCopying by remember { mutableStateOf(false) }
     var copyProgress by remember { mutableStateOf<CopyProgress?>(null) }
     
@@ -151,7 +153,7 @@ fun PtpImporterApp(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "This app needs access to your photos to copy JPG files. Please grant the required permissions.",
+                        text = "This app needs access to your photos to copy image and video files. Please grant the required permissions.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
@@ -172,7 +174,7 @@ fun PtpImporterApp(
                     
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "After granting permissions, you'll be able to select source and destination directories for copying JPG files.",
+                        text = "After granting permissions, you'll be able to select source and destination directories for copying your selected file types.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
@@ -288,6 +290,18 @@ fun PtpImporterApp(
         
         Spacer(modifier = Modifier.height(16.dp))
         
+        // File Type Selection
+        FileTypeSelector(
+            selectedFileTypes = selectedFileTypes,
+            onFileTypesChanged = { fileTypes ->
+                selectedFileTypes = fileTypes
+                directoryManager.setSelectedFileTypes(fileTypes)
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+        
         // Destination Directory Selection
         DirectorySelector(
             label = "Destination Directory",
@@ -338,7 +352,7 @@ fun PtpImporterApp(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = "• The app will search recursively through all subfolders",
+                        text = "• The app will search recursively through all subfolders for your selected file types",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -359,9 +373,9 @@ fun PtpImporterApp(
         Button(
             onClick = {
                 if (sourceDir != null && destDir != null) {
-                    android.util.Log.d("PtpImporterApp", "Starting copy: source=$sourceDir, dest=$destDir")
+                    android.util.Log.d("PtpImporterApp", "Starting copy: source=$sourceDir, dest=$destDir, types=$selectedFileTypes")
                     isCopying = true
-                    fileCopyManager.startCopying(sourceDir!!, destDir!!)
+                    fileCopyManager.startCopying(sourceDir!!, destDir!!, selectedFileTypes)
                 }
             },
             enabled = hasPermissions && 
@@ -369,21 +383,35 @@ fun PtpImporterApp(
                      destDir != null && 
                      sourceDirValid && 
                      destDirValid && 
-                     !isCopying,
+                     !isCopying &&
+                     selectedFileTypes.isNotEmpty(),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Start Copying JPG Files")
+            val fileTypeText = if (selectedFileTypes.size == 1) {
+                "Start Copying ${selectedFileTypes.first().uppercase().removePrefix(".")} Files"
+            } else {
+                "Start Copying ${selectedFileTypes.size} File Types"
+            }
+            Text(fileTypeText)
         }
         
         // Help text for disabled copy button
-        if (hasPermissions && sourceDir != null && destDir != null && 
-            (!sourceDirValid || !destDirValid)) {
-            Text(
-                text = "⚠️ One or more directories have expired access. Please reselect them to continue.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(top = 8.dp)
-            )
+        if (hasPermissions && sourceDir != null && destDir != null) {
+            if (!sourceDirValid || !destDirValid) {
+                Text(
+                    text = "⚠️ One or more directories have expired access. Please reselect them to continue.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            } else if (selectedFileTypes.isEmpty()) {
+                Text(
+                    text = "⚠️ Please select at least one file type to import.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
         }
         
         // Error Display
@@ -482,14 +510,14 @@ fun PtpImporterApp(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "No JPG files found",
+                                text = "No files found",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onTertiaryContainer
                             )
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "The selected source directory doesn't contain any JPG or JPEG files. Try selecting a different directory or check if the files are in subdirectories.",
+                            text = "The selected source directory doesn't contain any files of the selected types (${selectedFileTypes.joinToString(", ") { it.uppercase() }}). Try selecting a different directory or check if the files are in subdirectories.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onTertiaryContainer
                         )
