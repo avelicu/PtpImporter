@@ -98,6 +98,10 @@ class FileCopyManager(private val context: Context) {
                 ensureActive()
                 val fileName = file.name ?: continue
 
+                // Update progress to show the file we're about to copy
+                currentFile++
+                updateProgress(currentFile, totalFiles, fileName, startTime, existingFiles.size, filesToCopy.size)
+
                 var newFile: DocumentFile? = null
                 var copyFinished = false
                 try {
@@ -109,9 +113,6 @@ class FileCopyManager(private val context: Context) {
                                 input.copyTo(output)
                             }
                         }
-
-                        currentFile++
-                        updateProgress(currentFile, totalFiles, fileName, startTime, existingFiles.size, filesToCopy.size)
                     }
                     copyFinished = true
                 } catch (e: SecurityException) {
