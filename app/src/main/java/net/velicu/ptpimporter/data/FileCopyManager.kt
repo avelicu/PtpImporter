@@ -11,10 +11,11 @@ import java.io.InputStream
 import java.io.OutputStream
 import android.util.Log
 import java.io.File
-import androidx.exifinterface.media.ExifInterface
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import android.provider.DocumentsContract
+import android.provider.MediaStore
 
 class FileCopyManager(private val context: Context) {
     private var copyJob: Job? = null
@@ -205,37 +206,47 @@ class FileCopyManager(private val context: Context) {
     }
 
     private fun getCreationDatePrefix(sourceFile: DocumentFile): String {
-        // Try EXIF for images first
-        val nameLower = (sourceFile.name ?: "").lowercase(Locale.US)
-        val imageExtensions = setOf("jpg", "jpeg", "png", "tiff", "tif", "webp", "gif", "bmp", "dng", "cr2", "nef", "arw", "raf", "orf", "rw2", "pef", "srw")
-        val ext = nameLower.substringAfterLast('.', "")
-        // EXIF date format example: 2020:01:31 12:34:56
-        if (ext in imageExtensions) {
-            try {
-                context.contentResolver.openInputStream(sourceFile.uri)?.use { input ->
-                    val exif = ExifInterface(input)
-                    val exifDate = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
-                        ?: exif.getAttribute(ExifInterface.TAG_DATETIME)
-                    if (!exifDate.isNullOrBlank()) {
-                        val millis = parseExifDateMillis(exifDate)
-                        if (millis != null) return formatDatePrefix(millis)
-                    }
-                }
-            } catch (_: Exception) {
-                // Fallbacks below
-            }
-        }
-        // Fallback to lastModified if available
-        val lastModified = sourceFile.lastModified()
-        if (lastModified > 0L) return formatDatePrefix(lastModified)
-        // Final fallback: today
-        return formatDatePrefix(System.currentTimeMillis())
+        val createdMs = queryBestCreationMillis(sourceFile)
+        val millis = createdMs ?: sourceFile.lastModified().takeIf { it > 0L } ?: System.currentTimeMillis()
+        return formatDatePrefix(millis)
     }
 
-    private fun parseExifDateMillis(exifDate: String): Long? {
+    private fun queryBestCreationMillis(sourceFile: DocumentFile): Long? {
+        val resolver = context.contentResolver
+        val uri = sourceFile.uri
+        // Try multiple common columns without reading file content
+        val projection = arrayOf(
+            // MediaStore columns
+            MediaStore.Images.ImageColumns.DATE_TAKEN,
+            MediaStore.Video.VideoColumns.DATE_TAKEN,
+            MediaStore.MediaColumns.DATE_ADDED,
+            MediaStore.MediaColumns.DATE_MODIFIED,
+            // DocumentsContract column for last modified
+            DocumentsContract.Document.COLUMN_LAST_MODIFIED
+        )
         return try {
-            val parser = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US)
-            parser.parse(exifDate)?.time
+            resolver.query(uri, projection, null, null, null)?.use { cursor ->
+                if (!cursor.moveToFirst()) return null
+
+                fun readMs(columnName: String): Long? {
+                    val idx = cursor.getColumnIndex(columnName)
+                    if (idx >= 0 && !cursor.isNull(idx)) {
+                        val value = cursor.getLong(idx)
+                        if (value <= 0L) return null
+                        // Heuristic: values < 10^12 are likely seconds, otherwise millis
+                        val isSeconds = value < 1_000_000_000_000L
+                        return if (isSeconds) value * 1000L else value
+                    }
+                    return null
+                }
+
+                // Prefer true capture/creation-like times
+                readMs(MediaStore.Images.ImageColumns.DATE_TAKEN)
+                    ?: readMs(MediaStore.Video.VideoColumns.DATE_TAKEN)
+                    ?: readMs(MediaStore.MediaColumns.DATE_ADDED)
+                    ?: readMs(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+                    ?: readMs(MediaStore.MediaColumns.DATE_MODIFIED)
+            }
         } catch (_: Exception) {
             null
         }

@@ -57,8 +57,6 @@ dependencies {
     
     // DocumentFile for directory access
     implementation(libs.documentfile)
-    // EXIF for reading image metadata
-    implementation(libs.exifinterface)
     
     // Coroutines
     implementation(libs.coroutines.android)
