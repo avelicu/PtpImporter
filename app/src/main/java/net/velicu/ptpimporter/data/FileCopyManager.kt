@@ -95,6 +95,7 @@ class FileCopyManager(private val context: Context) {
                 val fileName = file.name ?: continue
 
                 var newFile: DocumentFile? = null
+                var copyFinished = false
                 try {
                     newFile = destDir.createFile("image/jpeg", fileName)
                     if (newFile != null) {
@@ -107,16 +108,18 @@ class FileCopyManager(private val context: Context) {
                         currentFile++
                         updateProgress(currentFile, totalFiles, fileName, startTime, existingFiles.size, filesToCopy.size)
                     }
+                    copyFinished = true
                 } catch (e: SecurityException) {
                     Log.e("FileCopyManager", "Security exception while copying file: $fileName", e)
                     _progress.value = CopyProgress.error("Permission denied while copying $fileName. This often happens with MTP devices. Try selecting individual files instead of a directory.")
-                    newFile?.delete()
                     return
                 } catch (e: IOException) {
                     Log.e("FileCopyManager", "IO exception while copying file: $fileName", e)
                     _progress.value = CopyProgress.error("Failed to copy $fileName: ${e.message}")
-                    newFile?.delete()
                     return
+                } finally {
+                    // This is dumb but.. whatever vibes
+                    if (!copyFinished) newFile?.delete()
                 }
             }
             
