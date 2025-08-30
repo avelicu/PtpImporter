@@ -21,14 +21,8 @@ class FileCopyManager(private val context: Context) {
         copyJob?.cancel()
         copyJob = CoroutineScope(Dispatchers.IO).launch {
             try {
-                // Check if the paths are actually URIs
-                if (sourcePath.startsWith("content://") || destPath.startsWith("content://")) {
-                    Log.d("FileCopyManager", "Using URI-based copying")
-                    copyJpgFilesFromUris(sourcePath, destPath)
-                } else {
-                    Log.d("FileCopyManager", "Using file path copying")
-                    copyJpgFiles(sourcePath, destPath)
-                }
+                Log.d("FileCopyManager", "Using URI-based copying")
+                copyJpgFilesFromUris(sourcePath, destPath)
             } catch (e: Exception) {
                 Log.e("FileCopyManager", "Error in startCopying", e)
                 _progress.value = CopyProgress.error("Failed to start copying: ${e.message}")
@@ -36,7 +30,7 @@ class FileCopyManager(private val context: Context) {
         }
     }
     
-    private suspend fun copyJpgFilesFromUris(sourceUri: String, destUri: String) {
+    private fun CoroutineScope.copyJpgFilesFromUris(sourceUri: String, destUri: String) {
         try {
             // Test directory access first
             testDirectoryAccess(sourceUri, destUri)
@@ -97,9 +91,7 @@ class FileCopyManager(private val context: Context) {
             _progress.value = CopyProgress.initial(totalFiles, existingFiles.size, filesToCopy.size)
 
             for (file in filesToCopy) {
-                if (copyJob?.isCancelled == true) {
-                    break
-                }
+                ensureActive()
                 val fileName = file.name ?: "unknown.jpg"
                 try {
                     val newFile = destDir.createFile("image/jpeg", fileName)
@@ -123,19 +115,21 @@ class FileCopyManager(private val context: Context) {
                 }
             }
             
-            if (copyJob?.isCancelled != true) {
-                _progress.value = _progress.value?.copy(isComplete = true)
-            }
+            _progress.value = _progress.value?.copy(isComplete = true)
         } catch (e: SecurityException) {
             Log.e("FileCopyManager", "Security exception during MTP operation", e)
-            _progress.value = CopyProgress.error("Permission denied accessing MTP device. Try selecting individual files instead of a directory.")
+            _progress.value =
+                CopyProgress.error("Permission denied accessing MTP device. Try selecting individual files instead of a directory.")
+        } catch (e: CancellationException) {
+            Log.e("FileCopyManager", "Cancelled")
+            _progress.value = CopyProgress.cancelled()
         } catch (e: Exception) {
             Log.e("FileCopyManager", "Unexpected error during copy operation", e)
             _progress.value = CopyProgress.error("Unexpected error: ${e.message}")
         }
     }
     
-    private fun precalculateExistingFiles(sourceFiles: List<DocumentFile>, destDir: DocumentFile): Pair<List<DocumentFile>, List<DocumentFile>> {
+    private fun CoroutineScope.precalculateExistingFiles(sourceFiles: List<DocumentFile>, destDir: DocumentFile): Pair<List<DocumentFile>, List<DocumentFile>> {
         val filesToCopy = mutableListOf<DocumentFile>()
         val existingFiles = mutableListOf<DocumentFile>()
         
@@ -148,7 +142,7 @@ class FileCopyManager(private val context: Context) {
         try {
             val destFiles = destDir.listFiles()
             Log.d("FileCopyManager", "Destination directory contains ${destFiles.size} items")
-            
+
             for (destFile in destFiles) {
                 if (destFile.isFile) {
                     existingFileNames.add(destFile.name ?: "")
@@ -166,11 +160,8 @@ class FileCopyManager(private val context: Context) {
         
         for ((index, sourceFile) in sourceFiles.withIndex()) {
             // Check for cancellation during pre-calculation
-            if (copyJob?.isCancelled == true) {
-                Log.d("FileCopyManager", "Pre-calculation cancelled")
-                return Pair(filesToCopy, existingFiles)
-            }
-            
+            ensureActive()
+
             // Update progress every 10 files or for the last file
             if (index % 10 == 0 || index == sourceFiles.size - 1) {
                 _progress.value = CopyProgress.scanning("Checking existing files... ${index + 1}/${sourceFiles.size}")
@@ -189,59 +180,7 @@ class FileCopyManager(private val context: Context) {
         return Pair(filesToCopy, existingFiles)
     }
     
-    private fun precalculateExistingFiles(sourceFiles: Array<java.io.File>, destDir: java.io.File): Pair<Array<java.io.File>, Array<java.io.File>> {
-        val filesToCopy = mutableListOf<java.io.File>()
-        val existingFiles = mutableListOf<java.io.File>()
-        
-        Log.d("FileCopyManager", "Starting pre-calculation for ${sourceFiles.size} files")
-        
-        // First, enumerate all files in the destination directory to create a fast lookup set
-        _progress.value = CopyProgress.scanning("Scanning destination directory for existing files...")
-        val existingFileNames = mutableSetOf<String>()
-        
-        try {
-            val destFiles = destDir.listFiles() ?: emptyArray()
-            Log.d("FileCopyManager", "Destination directory contains ${destFiles.size} items")
-            
-            for (destFile in destFiles) {
-                if (destFile.isFile) {
-                    existingFileNames.add(destFile.name)
-                }
-            }
-            Log.d("FileCopyManager", "Found ${existingFileNames.size} existing files in destination")
-        } catch (e: Exception) {
-            Log.w("FileCopyManager", "Error scanning destination directory: ${e.message}")
-            // If we can't scan the destination, assume all files need to be copied
-            return Pair(sourceFiles, emptyArray())
-        }
-        
-        // Now do fast in-memory existence checks
-        _progress.value = CopyProgress.scanning("Checking which files already exist...")
-        
-        for ((index, sourceFile) in sourceFiles.withIndex()) {
-            // Check for cancellation during pre-calculation
-            if (copyJob?.isCancelled == true) {
-                Log.d("FileCopyManager", "Pre-calculation cancelled")
-                return Pair(filesToCopy.toTypedArray(), existingFiles.toTypedArray())
-            }
-            
-            // Update progress every 10 files or for the last file
-            if (index % 10 == 0 || index == sourceFiles.size - 1) {
-                _progress.value = CopyProgress.scanning("Checking existing files... ${index + 1}/${sourceFiles.size}")
-            }
-            
-            if (existingFileNames.contains(sourceFile.name)) {
-                existingFiles.add(sourceFile)
-            } else {
-                filesToCopy.add(sourceFile)
-            }
-        }
-        
-        Log.d("FileCopyManager", "Pre-calculation complete: ${sourceFiles.size} total, ${existingFiles.size} exist, ${filesToCopy.size} to copy")
-        return Pair(filesToCopy.toTypedArray(), existingFiles.toTypedArray())
-    }
-    
-    private fun getAllFilesRecursively(directory: DocumentFile): List<DocumentFile> {
+    private fun CoroutineScope.getAllFilesRecursively(directory: DocumentFile): List<DocumentFile> {
         val allFiles = mutableListOf<DocumentFile>()
         val files = directory.listFiles()
         
@@ -249,10 +188,7 @@ class FileCopyManager(private val context: Context) {
         
         for (file in files) {
             // Check for cancellation during recursive search
-            if (copyJob?.isCancelled == true) {
-                Log.d("FileCopyManager", "File discovery cancelled")
-                return allFiles
-            }
+            ensureActive()
             
             if (file.isFile) {
                 allFiles.add(file)
@@ -264,33 +200,6 @@ class FileCopyManager(private val context: Context) {
         
         Log.d("FileCopyManager", "Directory ${directory.name} total files: ${allFiles.size}")
         return allFiles
-    }
-    
-    private fun getAllJpgFilesRecursively(directory: java.io.File): Array<java.io.File> {
-        val allFiles = mutableListOf<java.io.File>()
-        val files = directory.listFiles() ?: emptyArray()
-        
-        Log.d("FileCopyManager", "Scanning directory: ${directory.name} (${files.size} items)")
-        
-        for (file in files) {
-            // Check for cancellation during recursive search
-            if (copyJob?.isCancelled == true) {
-                Log.d("FileCopyManager", "File discovery cancelled")
-                return allFiles.toTypedArray()
-            }
-            
-            if (file.isFile) {
-                if (file.extension.lowercase() in listOf("jpg", "jpeg")) {
-                    allFiles.add(file)
-                }
-            } else if (file.isDirectory) {
-                Log.d("FileCopyManager", "Found subdirectory: ${file.name}, recursing...")
-                allFiles.addAll(getAllJpgFilesRecursively(file))
-            }
-        }
-        
-        Log.d("FileCopyManager", "Directory ${directory.name} total JPG files: ${allFiles.size}")
-        return allFiles.toTypedArray()
     }
     
     private fun testDirectoryAccess(uriString: String, directoryType: String): Boolean {
@@ -341,98 +250,6 @@ class FileCopyManager(private val context: Context) {
     fun cancelCopying() {
         Log.d("FileCopyManager", "Cancelling copy operation")
         copyJob?.cancel()
-        // Clear progress and indicate operation was cancelled
-        _progress.value = CopyProgress.cancelled()
-    }
-    
-    private suspend fun copyJpgFiles(sourcePath: String, destPath: String) {
-        try {
-            val sourceDir = File(sourcePath)
-            val destDir = File(destPath)
-            
-            if (!sourceDir.exists() || !sourceDir.isDirectory) {
-                _progress.value = CopyProgress.error("Source directory not found")
-                return
-            }
-            
-            if (!destDir.exists() || !destDir.isDirectory) {
-                _progress.value = CopyProgress.error("Destination directory not found")
-                return
-            }
-
-            // Start scanning phase
-            _progress.value = CopyProgress.scanning("Scanning source directory for JPG files...")
-            
-            val allFiles = getAllJpgFilesRecursively(sourceDir)
-            _progress.value = CopyProgress.scanning("Found ${allFiles.size} JPG files. Checking destination for existing files...")
-            
-            if (allFiles.isEmpty()) {
-                _progress.value = CopyProgress.error("No JPG files found in source directory")
-                return
-            }
-
-            // Pre-calculate existing files
-            _progress.value = CopyProgress.scanning("Checking destination for existing files...")
-            val (filesToCopy, existingFiles) = precalculateExistingFiles(allFiles, destDir)
-            
-            if (filesToCopy.isEmpty()) {
-                Log.d("FileCopyManager", "All JPG files already exist in destination")
-                _progress.value = CopyProgress(
-                    currentFile = 0,
-                    totalFiles = 0,
-                    progress = 1f,
-                    currentFileName = "",
-                    estimatedTimeRemaining = 0L,
-                    isComplete = true,
-                    existingFiles = existingFiles.size,
-                    filesToCopy = 0
-                )
-                return
-            }
-
-            val totalFiles = filesToCopy.size
-            Log.d("FileCopyManager", "Found ${allFiles.size} total JPG files, ${existingFiles.size} already exist, ${filesToCopy.size} will be copied")
-            var currentFile = 0
-            val startTime = System.currentTimeMillis()
-
-            _progress.value = CopyProgress.initial(totalFiles, existingFiles.size, filesToCopy.size)
-
-            for (file in filesToCopy) {
-                if (copyJob?.isCancelled == true) {
-                    break
-                }
-                val fileName = file.name
-                try {
-                    val destFile = File(destDir, fileName)
-                    file.copyTo(destFile, overwrite = false)
-                    currentFile++
-                    updateProgress(currentFile, totalFiles, fileName, startTime, existingFiles.size, filesToCopy.size)
-                } catch (e: IOException) {
-                    Log.e("FileCopyManager", "IO exception while copying file: $fileName", e)
-                    _progress.value = CopyProgress.error("Failed to copy $fileName: ${e.message}")
-                    return
-                }
-            }
-            
-            if (copyJob?.isCancelled != true) {
-                _progress.value = _progress.value?.copy(isComplete = true)
-            }
-        } catch (e: Exception) {
-            Log.e("FileCopyManager", "Unexpected error during copy operation", e)
-            _progress.value = CopyProgress.error("Unexpected error: ${e.message}")
-        }
-    }
-    
-    private fun copyFile(source: java.io.File, dest: java.io.File) {
-        java.io.FileInputStream(source).use { input ->
-            java.io.FileOutputStream(dest).use { output ->
-                val buffer = ByteArray(8192)
-                var bytesRead: Int
-                while (input.read(buffer).also { bytesRead = it } != -1) {
-                    output.write(buffer, 0, bytesRead)
-                }
-            }
-        }
     }
     
     private fun updateProgress(currentFile: Int, totalFiles: Int, currentFileName: String, startTime: Long, existingFiles: Int, filesToCopy: Int) {
